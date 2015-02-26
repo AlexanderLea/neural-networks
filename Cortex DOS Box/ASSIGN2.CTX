@@ -1,0 +1,788 @@
+/ Program ASSIGN2.CTX
+/ Alexander Lea 2014 adapted from G Bugmann's prac2.ctx
+/*HS!!1*/// variables
+
+int epoch_count=0, iterations = 5100
+int i,j,k, nodes_id
+float x, y, global_err = 0, last_global_err = 0
+float target_error = 0.02
+float global_test_err = 0, last_global_test_err = 0
+float target_test_error = 0.02
+int plot_color = 5
+
+float current_x, current_y, demanded_y
+float my_size_per_node
+int nb_hidden_units = 8
+/int nb_hidden_units = 3
+/------initial values-------
+float learnrate = 0.004
+float boost = 6.0
+momentum = 0.95 // the momentum variable already exists
+/----------------------------
+float max_mom = momentum
+float max_learnrate = learnrate
+float old_output_weights[nb_hidden_units+1]
+float target_error = 0.02
+float defect_activity
+int ug_flag = 0
+int deadnodes[nb_hidden_units] = 0
+int last_killed = -1
+
+gosub revivenodes
+
+/*HH1!1*/// buttons
+
+
+defpan progpan
+button "<TESTROB>", "gosub test_robustness"
+button "<SET>", "pushpan mysetpan"
+butgap
+button "init", "gosub init"
+button "info", "panel_info"
+butgap
+button "PLOTALL", "gosub plot_netfunc_and_data"
+button "plot_test", "gosub plottest"
+button "plot_tp", "gosub plottp"
+/button "loadnet", "gosub load_net"
+butgap
+//button "pak mode", "gosub mode_switch"
+button "EVALUATE", "gosub evaluate"
+button "TEST", "gosub test1"
+button "LEARN", "gosub learn1"
+/button "LEARNALL", "gosub learnall"
+//button "FUNCTION", "gosub funct"
+butgap
+butgap
+button "return", "poppan"
+pushpan progpan
+
+defpan testpan
+
+button "defect=1", "defect_activity = 1"
+button "defect=0", "defect_activity = 0"
+
+button "Damagenode", "gosub killnode"
+button "Repair all",  "gosub revivenodes"
+butgap
+button "PLOTALL", "gosub test_plotall"
+butgap
+button "one node", "gosub single_node_funct"
+butgap
+button "return", "poppan"
+
+defpan mysetpan
+
+button "mom", "gosub getmom"
+button "l.r.", "gosub getlr"
+button "boost", "gosub getboost"
+butgap
+//button "togdisp", "gosub togdisp"
+button "ug OFF", "ug_flag=0"
+button "ug ONN", "ug_flag=1"
+butgap
+
+
+button "return", "poppan"
+
+/*HH1!1*/// graphs
+
+graph_default_gridtype 0
+graph_default_axislabel "Iterations", "Error"
+graph_default_range 0, 0, float(iterations), 1
+makegraph learning_curve
+
+graph_default_gridtype 0
+graph_default_axislabel "Training Pattern", "Exchange Rate"
+graph_default_range 0, 0, 60, 1
+makegraph target_output
+
+/*HH1!1*/// startup
+gosub build
+uw
+gosub rand
+gosub init
+gosub togdisp
+print " "
+print " "
+print " -------------------------------------- "
+print "|        AINT303 Assignment 2014       |"
+print "|            Alexander Lea             |"
+print "|  Forecasting GBP/USD Exchange Rates  |"
+print " -------------------------------------- "
+end
+/*HH1!1*///-----
+/*SH1!1*/set_train_file:
+	string current_tp = "trdat1.dat"
+/	string current_tp = "trdat2.dat"		
+return
+/*SS!!1*/set_test_file:
+	string current_tp = "tedat1.dat"
+/	string current_tp = "tedat2.dat"
+return
+
+/*HS!!1*/// Different Graphs (created by Alex - doesn't work)
+//graph_default_gridtype 0
+//graph_default_axislabel "Time", "Normalised Rate"
+//graph_default_range 0, 0, 12, 2
+//makegraph Rates
+/*SH1!1*/build:
+
+dg 1, 3, INPUT_NODE_TYPE
+mg Input
+
+dg 1, 1, INPUT_NODE_TYPE
+mg Bias
+
+dg 1, 40, BACKPROP_NODE_TYPE
+mg Hidden
+
+dg 1, 1, LINEAR_NODE_TYPE
+mg Output
+
+wiretype BACKPROP_WIRE_TYPE
+connect Input, Hidden
+connect Bias, Hidden
+connect Hidden, Output
+connect Bias, Output
+
+uw
+
+return
+/*HS!!1*/init:
+gosub rand
+set_node_output first_node(Bias), 1
+epoch_count = -1
+i=-1
+float factor=1, old_global_error = 99999
+/momentum = max_mom
+
+tp_defclear
+tp_clamp Input
+tp_target Output
+layer_define Hidden, Output
+
+return
+/*HH1!1*/// learning and testing routines------------------
+/*HH1!1*/learn1:
+//gosub init
+int test_interval = 100 
+
+gosub set_train_file
+gosub learn
+plot_color=LBLUE
+gosub plotdata
+return
+
+/*HH1!1*/test1:
+	gosub set_test_file
+	gosub loadtp
+	gosub testnet
+	gosub netfunct
+	plot_color=BLUE
+	gosub plotdata
+	print "Epoch = ", epoch_count, " Av TEST RMS = ", global_test_err, 
+return
+/*HH1!1*/learn:
+print "Learning rate: ",learnrate, "  Momentum: ",momentum,"  Boost factor: ", boost  
+int flag=0
+/float factor=1, old_global_error = 99999
+
+/tp_defclear
+/tp_clamp Input
+/tp_target Output
+/layer_define Hidden, Output
+gosub loadtp
+/graph_active learning_curve
+
+/*SS!!2*/// main loop
+while 1
+
+	epoch_count += 1
+	i += 1
+	if i=iterations-1
+		pak
+	endif
+
+	if epoch_count%iterations=0
+		graph_clear learning_curve
+		i=1
+	endif
+/for i = 1 to iterations
+
+	global_err = 0
+	for j = 0 to last_training_pat
+		tp_present j
+		/gosub rescale_input
+		gosub rescale_target
+		updategrid Hidden, Output
+		global_err = global_err + rmsdt(Output)/float(last_training_pat+1) 
+	//	bplearn learnrate
+		boosted_bplearn learnrate, boost
+		gosub rescale_output
+		
+		if last_global_err > 0.05 & ug_flag = 1
+//			ug
+		endif
+								
+	next j
+
+		graph_active learning_curve
+		graph_plottype DOT_SHAPE
+		if global_err > 0.01
+			plot float(i), global_err, WHITE
+		endif
+		if global_err < 0.1  
+			plot float(i), 10*global_err, RED
+		endif
+		if global_err < 0.01  
+			plot float(i), 100*global_err, YELLOW
+		endif
+		last_global_err = global_err
+		/plot float(i), momentum, 4
+		// the greyline is the learning rate.
+		plot float(i), learnrate, 4	
+		
+/	if epoch_count%20=0
+	if epoch_count%test_interval=0
+		gosub netfunct
+		plot_color=LBLUE
+		gosub plotdata
+//		ug
+	endif
+
+/if global_err <= target_error & flag=0
+/	print "Epoch = ", epoch_count, " Av RMS = ", global_err
+/	pak
+/	flag=1
+/endif
+
+/*HS!!2*///goto flag_end 
+// ---automatic learning rate adjustment---------
+
+// this "goto" makes us jump this part which
+// modifies the learning rate to keep it as
+// high as possible without oscilations. 
+// Attempts to modify the momentum in
+// dependence of the evolution of the
+// global error had no good results so
+// far.
+
+if global_err > 1.05*old_global_error 
+	max_learnrate = 1.1*learnrate
+	learnrate = 0.8*learnrate
+else
+	learnrate = learnrate + 0.0004*(max_learnrate-learnrate)
+endif
+
+old_global_error = 0.7*global_err+0.3*old_global_error
+/print global_err-old_global_error
+/*HH2!2*/flag_end:
+
+/*HH2!2*/testing:
+
+if epoch_count%test_interval=0
+	gosub set_test_file
+	gosub loadtp
+	gosub testnet
+	gosub set_train_file
+	gosub loadtp
+	print "Epoch = ", epoch_count, " Av TRAIN RMS = ", global_err, " Av TEST RMS = ", global_test_err, 
+endif
+
+/*HH2!2*//end of iteration loop
+endwhile
+/next i
+
+
+/*SH2!2*/return
+/*HH1!1*/testnet:
+
+/tp_defclear
+/tp_clamp Input
+/tp_target Output
+/layer_define Hidden, Output
+/graph_active learning_curve
+/graph_clear learning_curve
+
+	gosub loadtp
+
+	global_test_err = 0
+
+	for j = 0 to last_training_pat
+		tp_present j
+		/gosub rescale_input
+		gosub rescale_target
+		updategrid Hidden, Output
+		global_test_err = global_test_err + rmsdt(Output)/float(last_training_pat+1) 
+		gosub rescale_output
+	next j
+
+	graph_active learning_curve
+	graph_plottype BOX_SHAPE
+	if global_test_err > 1
+		plot float(i), 0.1*global_test_err, BLUE
+	endif
+	if global_test_err > 0.01
+		plot float(i), global_test_err, WHITE
+	endif
+	if global_test_err < 0.01  
+		plot float(i), 100*global_test_err, YELLOW
+		graph_plottype DOT_SHAPE
+		plot float(i), 100*global_test_err, RED
+		print "Y"
+	endif
+	if global_test_err < 0.1
+		graph_plottype BOX_SHAPE
+		plot float(i), 10*global_test_err, RED
+		graph_plottype DOT_SHAPE
+		plot float(i), 10*global_test_err, YELLOW
+	endif
+
+	/last_global_test_err = global_test_err
+	
+/*SS!!2*/return
+/*HH1!1*/loadtp:
+tp_load current_tp
+
+return
+/
+/ load
+/
+
+//----evaluate target vs output ----//
+/*SH1!1*/evaluate:
+print "Evaluating"
+
+tp_load "future1.dat"
+/tp_load "future2.dat"
+
+for j = 0 to last_training_pat
+    tp_present j
+/	gosub rescale_input
+/	gosub rescale_target
+    updategrid Hidden, Output
+	
+   	//plot target vs output		 
+	current_x = node_output(first_node(Output))		
+	float demanded_x = node_target(first_node(Output))
+	
+	print "node output:", current_x, " node target:", demanded_y		
+	graph_active target_output
+	graph_plottype BOX_SHAPE
+	plot float(j), current_x, RED
+	graph_plottype PLUS_SHAPE
+	plot float(j), demanded_x, GREEN		
+next j
+
+return
+
+/*SS!!1*///----rescalling data to 0-1 sigmoid operation range 
+/*HS!!1*/rescale_output:
+return
+
+//expand values from [0,1] into [-1, +1]
+/set_node_output first_node(Output), 2*node_output(first_node(Output))-1
+//expand values from [0,1] into [-2, +2]
+set_node_output first_node(Output), 4*node_output(first_node(Output))-2
+
+return
+
+/*HH1!1*/rescale_input:
+return
+// squeeze values [-1, + 1] into [0, 1]
+nodes_id = first_node(Input)
+	set_node_output nodes_id, 0.5*node_output(nodes_id)+0.5
+
+return
+
+/*HH1!1*/rescale_target:
+return
+nodes_id = first_node(Output)
+// squeeze values [-1, + 1] into [0, 1]
+/set_node_target nodes_id, 0.5*node_target(nodes_id)+0.5
+// squeeze values [-2, + 2] into [0, 1]
+set_node_target nodes_id, 0.25*node_target(nodes_id)+0.5
+return
+
+/*SH1!1*///----plotting routines-----------------------------
+/*HS!!1*/plottp:
+gosub set_train_file
+graph_active Network_Function
+graph_clear 
+gosub loadtp
+plot_color=LBLUE
+gosub plotdata
+return
+/*HH1!1*/plottest:
+gosub set_test_file
+graph_clear Network_Function
+gosub loadtp
+plot_color=BLUE
+gosub plotdata
+return
+/*HH1!1*/plot_netfunc_and_data:
+	gosub netfunct
+	gosub set_train_file
+	gosub loadtp
+	plot_color=LBLUE
+	gosub plotdata
+	gosub set_test_file
+	plot_color=BLUE
+	gosub loadtp
+	gosub plotdata
+return
+
+float old_x = 0, old_y = 0
+
+graph_active Network_Function
+graph_plottype DOT_SHAPE
+graph_clear
+for k = 1 to 100
+	x = float(k-50)/50
+	set_node_output first_node(Input), x
+	gosub rescale_input
+	updategrid Hidden
+	gosub assign_defect_activities
+	updategrid Output
+	ug
+	gosub rescale_output
+	y = node_output(first_node(Output))
+	if k = 1 
+	plot x,y, GREEN
+	endif
+	if k>1
+	move old_x, old_y
+	line x,y, GREEN
+	endif
+	old_y = y
+	old_x = x
+
+next k 
+string current_tp = "mlpdem1.dat"
+gosub loadtp
+gosub plotdata
+string current_tp = "mlpdem2.dat"
+gosub loadtp
+gosub plotdata
+
+return
+/*HH1!1*/netfunct:
+
+return
+
+float old_x = 0, old_y = 0
+float x_min = -2, x_max = 5
+int max_cycle = 100
+graph_active Network_Function
+graph_plottype DOT_SHAPE
+graph_clear
+for k = 1 to max_cycle
+	x = x_min+float(k)*(x_max-x_min)/float(max_cycle)
+	set_node_output first_node(Input), x
+	/gosub rescale_input
+	updategrid Hidden, Output
+	gosub rescale_output
+	y = node_output(first_node(Output))
+	if k = 1 
+	plot x,y, GREEN
+	endif
+	if k>1
+	move old_x, old_y
+	line x,y, GREEN
+	endif
+	old_y = y
+	old_x = x
+
+next k 
+
+return
+/*HH1!1*/plotdata:
+//tp_defclear
+//tp_clamp Input
+//tp_target Output
+//gosub loadtp
+
+return
+
+graph_active Network_Function
+
+	for j = 0 to last_training_pat
+
+	tp_present j
+	current_x = node_output(first_node(Output))
+	demanded_y = node_target(first_node(Output))
+
+	graph_plottype BOX_SHAPE
+	plot current_x, demanded_y, plot_color 
+
+	graph_plottype PLUS_SHAPE
+	plot current_x, demanded_y, plot_color
+
+	next j
+
+
+return
+/*SH1!1*///-----setting parameters---------------------------
+/*HS!!1*/rand:
+ran .1
+ug
+return
+/
+/ edit
+/
+/*HH1!1*/getlr:
+printf "Change learnrate from %.4f to ->", learnrate
+input learnrate
+max_learnrate = learnrate
+return
+/
+/*HH1!1*/getboost:
+printf "Change boost factor from %.4f to ->", boost
+input boost
+return
+/
+/*HH1!1*/getmom:
+printf "Change momentum from %.4f to ->", momentum
+input momentum
+return
+/
+/*HH1!1*/togdisp:
+int z
+if z=0
+map_mult_factor = 0.2
+	grid_nodestyle Output, MAPOUT_DISP_STYLE
+	grid_nodestyle Hidden, MAPOUT_DISP_STYLE
+else
+	grid_nodestyle Output, SIZE_DISP_STYLE
+	grid_nodestyle Hidden, SIZE_DISP_STYLE
+endif
+let z = !z
+ug
+return
+/
+/*SH1!1*///-----testing the robustness of the trained net-----
+/*HS!!1*/test_robustness:
+
+pushpan testpan
+
+print "This is an illustration of the lack of robustness of a trained MLP."
+print "We test the effect of a defective hidden node. "
+
+print " "
+print "Please select the type of defect: stuck at 1 or at 0"  
+print "Then select the node(s) you want to damage, then <PLOTALL>"
+
+return
+
+/*HH1!1*/killnode:
+	printf "--> Click with mouse on node"
+	deadnodes[last_killed+1] = mousenode()
+	last_killed = last_killed+1
+	print " "
+	print "Killed node = ", deadnodes[last_killed]
+return
+/*HH1!1*/revivenodes:
+print "All nodes are repaired !"
+	for nodes_id = 0 to nb_hidden_units-1
+		deadnodes[nodes_id] = 0	
+	next nodes_id
+	last_killed = -1
+return
+/*HH1!1*/assign_defect_activities:
+for nodes_id = 0 to nb_hidden_units-1
+	if deadnodes[nodes_id] > 0
+		set_node_output deadnodes[nodes_id], defect_activity
+	endif
+next nodes_id
+return
+
+/*HH1!1*/test_plotall:
+float old_x = 0, old_y = 0
+int current_color[3]
+current_color[1] = 4
+current_color[2] = GREEN 
+graph_active Network_Function
+graph_plottype DOT_SHAPE
+graph_clear
+int repeat
+
+gosub set_train_file
+/string current_tp = "mlpdem3.dat"
+gosub loadtp
+plot_color=LBLUE
+gosub plotdata
+
+for repeat = 1 to 2
+
+// do a fast pseudo learning to measure the error
+
+	global_err = 0
+	for j = 0 to last_training_pat
+		tp_present j
+		gosub rescale_input
+		gosub rescale_target
+		updategrid Hidden
+		if repeat = 2
+			gosub assign_defect_activities
+		endif
+		updategrid Output
+		global_err = global_err + rmsdt(Output)/float(last_training_pat+1) 
+	next j
+
+// plot the function
+float x_min = -2, x_max = 5
+int max_cycle = 100
+
+for k = 1 to max_cycle
+	x = x_min+float(k)*(x_max-x_min)/float(max_cycle)
+	set_node_output first_node(Input), x
+	/gosub rescale_input
+	updategrid Hidden
+	if repeat = 2
+		gosub assign_defect_activities
+	endif
+	updategrid Output
+	if repeat = 2
+		ug
+	endif
+	gosub rescale_output
+	
+	// Plotting the function
+
+	y = node_output(first_node(Output))
+	if k = 1 
+		plot x,y, current_color[repeat]
+	endif
+	if k>1
+		move old_x, old_y
+		line x,y, current_color[repeat]
+	endif
+	old_y = y
+	old_x = x
+
+next k 
+
+if repeat= 1
+	print "Average error (undamaged) = ",global_err 
+endif
+if repeat=2
+	print "Average error (damaged) = ",global_err 
+endif
+next repeat
+
+return
+/*SH1!1*///-----making training and test data files--------
+/*HS!!1*/my_function_y_of_xz:
+/y = 0.5 * sin(x*x)/x
+y = 0.25 * x
+y = y *(1+ 0.33*frand_ab(-1,+1))
+/y=0
+return
+
+
+/*HH1!1*/make_data_file:
+int size_of_data_set = 10
+float x_min = -1, x_max = 4
+
+fileopen "train10x.dat", NEW_FILE
+/fileopen "test10x.dat", NEW_FILE
+
+int k
+fon
+
+for k = 1 to size_of_data_set
+/	non-linear scale (more data at large x)
+/	x = x_min+log(sqrt(float(k)))*(x_max-x_min)/log(sqrt(float(size_of_data_set)))
+/	Linear scale 
+	x = x_min+float(k)*(x_max-x_min)/float(size_of_data_set)
+/	Linear scale shifted by 1/2 unit
+/	x = x_min+(float(k)+0.5)*(x_max-x_min)/float(size_of_data_set)
+/	Random choice
+/	x=frand_ab(-1,4)
+/	z=frand_ab(-1,1)
+	gosub my_function_y_of_xz
+
+/	printf "%f %f ",x,z
+	printf "%f ",x
+
+	printf "\n"
+	printf "\n"
+
+	printf "%f ",y
+
+	printf "\n"
+	printf "\n"
+	printf "\n"
+
+next k
+
+foff
+fileclose
+
+return
+
+/*SH1!1*///----not used subroutines -----------------------
+/*HS!!1*/load_net:
+loadnet
+uw
+return
+/*HH1!1*/find_free_node:
+int free_node_id
+for free_node_id = first_node(Hidden) to last_node(Hidden)
+	if wire_weight(first_input_wire(free_node_id)) = 99999
+		return
+	endif
+next free_node_id
+return
+/*HH1!1*/single_node_funct:
+ran .0
+
+int nodes2_id = first_node(Hidden)
+set_node_inweights nodes2_id, 8.0
+set_grid_outweights Bias, 0 
+//set_grid_inweights Output, 4.0
+float old_x = 0, old_y = 0
+
+graph_active Network_Function
+graph_plottype DOT_SHAPE
+graph_clear
+for k = 1 to 100
+	x = float(k-50)/50
+	set_node_output first_node(Input), x
+//	gosub rescale_input
+
+	updategrid Hidden
+//	gosub rescale_output
+//	y = node_output(first_node(Output))
+	//expand values from [0,1] into [-1, +1]
+	set_node_output nodes2_id, 2*node_output(nodes2_id)-1
+	y = node_output(nodes2_id)
+	if k = 1 
+	plot x,y, GREEN
+	endif
+	if k>1
+	move old_x, old_y
+	line x,y, GREEN
+	endif
+	old_y = y
+	old_x = x
+//	ms_delay 20
+	ug
+
+next k 
+return
+/*HH1!1*/store_old_w:
+int w_id, w0_id = first_input_wire(first_node(Output))
+scan_wires_entering_node w_id, first_node(Output)
+old_output_weights[w_id-w0_id] = wire_weight(w_id)
+endscan
+return
+/*HH1!1*/restore_old_w:
+int w_id, w0_id = first_input_wire(first_node(Output))
+scan_wires_entering_node w_id, first_node(Output)
+set_wire_weight w_id, 0.5*old_output_weights[w_id-w0_id] + 0.5*wire_weight(w_id)
+endscan
+return
+/*HH1!1*/edittp:
+/*SH1!1*/
+/*#CP=07633:XX=99*/

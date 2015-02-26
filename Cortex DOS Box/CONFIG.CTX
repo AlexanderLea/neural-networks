@@ -1,0 +1,5 @@
+node_space 1800000
+wire_space 3200000
+grid_space 5000
+training_pattern_space 240000
+variable_space 200000
